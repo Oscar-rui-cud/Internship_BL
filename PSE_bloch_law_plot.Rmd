@@ -1,0 +1,264 @@
+---
+title: "PSE_Bloch_law_plot"
+author: "oscar"
+date: "2025-06-17"
+output: html_document
+---
+
+# Import the Data and organize them
+First we import the data of each tasks for one participant and each r library that we need.
+```{r, echo=TRUE}
+library(readr)
+library(ggplot2)
+library(dplyr)
+library(ggrepel)
+
+#Change the number xx_faces_discr/BL_faces_xx_data_table.csv" and re-run all chunck to see the plot of another participant number xx
+
+
+contr_landscape <- read_csv("/home/ruiz/Documents/Stage_brxl/DATA_BOCH_LAW/PSE/subj_01_bloch_law_landscapes_PSE/BL_landscapes_PSE_01_data_table.csv")
+contr_faces <- read_csv("/home/ruiz/Documents/Stage_brxl/DATA_BOCH_LAW/PSE/subj_01_bloch_law_faces_PSE/BL_faces_PSE_01_data_table.csv")
+contr_objects <- read_csv("/home/ruiz/Documents/Stage_brxl/DATA_BOCH_LAW/PSE/subj_01_bloch_law_objects_PSE/BL_objects_PSE_01_data_table.csv")
+
+# we use head to check if each data set are imported properly.
+head(contr_objects)
+head(contr_faces)
+head(contr_landscape)
+```
+
+## Dividing the data frames into subsets
+
+We divide the three data frames into subsets for eachs 10 durations and we extract the final threshold for each of theses durations and we also extract the final contrast for each of theses durations.
+```{r, echo=FALSE}
+split_by_factor <- function(data, factor_var) {
+  # Convert variable to factor if it isn't already
+  if (!is.factor(data[[factor_var]])) {
+    data[[factor_var]] <- factor(data[[factor_var]])
+  }
+  
+  # Split data frame into list of subsets
+  split(data, data[[factor_var]])
+}
+
+
+subsets_faces <- split_by_factor(contr_faces, "duration_test")
+subsets_objects <- split_by_factor(contr_objects, "duration_test")
+subsets_landscapes <- split_by_factor(contr_landscape, "duration_test")
+
+# I tried to create a function to replace each column trial_n of each subsets by the vector "trials" but because every columns dont have the same length it create an error that I'm too lazy  to fix for now. (it still work)
+trials <- seq(from = 1, to = 50 , length = 50)
+for (i in 1:10) {
+  subsets_faces[[i]]$trial_n <- trials
+}
+for (i in 1:10) {
+  subsets_objects[[i]]$trial_n <- trials
+}
+for (i in 1:10) {
+  subsets_landscapes[[i]]$trial_n <- trials
+}
+
+#Now we create a vector containing the last updated value for each duration and a vector of the contrast for each of these value
+
+final_thresholds_faces <- sapply(1:10, function(i) subsets_faces[[i]]$updated_threshold[50])
+final_thresholds_objects <- sapply(1:10, function(i) subsets_objects[[i]]$updated_threshold[50])
+final_thresholds_landscapes <- sapply(1:10, function(i) subsets_landscapes[[i]]$updated_threshold[50])
+
+
+final_contrasts_faces <- sapply(1:10, function(i) subsets_faces[[i]]$contrast_test[50])
+final_contrasts_objects <- sapply(1:10, function(i) subsets_objects[[i]]$contrast_test[50])
+final_contrasts_landscapes <- sapply(1:10, function(i) subsets_landscapes[[i]]$contrast_test[50])
+```
+
+# Stairs plots
+Now we create plot of updated threshold for each trials of each duration to see if the algorithm is working. If it worked we should see stair like plot that converge to a certain value at the 50th trials. If we dont see any stair shape it mean that it didn't work properly, and if the value to which the updated threshold converge is 100 or > 99 it mean that we can't find the "true" threshold wihin our contrasts range. So theses value will be filtered later.
+
+```{r, echo=FALSE,fig.show="hold", out.width="50%"}
+plot_stair_faces <- function(data, duration_level, threshold_50){
+  ggplot(data = data , aes(x = trial_n)) +
+    geom_point(aes(y = updated_threshold, colour = factor(resp))) +
+    geom_line(aes(y = updated_threshold, linetype = "Threshold"), color = "black") +
+    geom_line(aes(y = contrast_test, linetype = "Contrast"), color = "black") +
+    scale_linetype_manual(name = "Lines",
+                        values = c("Threshold" = "solid", "Contrast" = "dashed")) +
+    scale_color_manual(name = "Response",
+                       values = c("0" = "red", "1" = "lightgreen"),  # Adjust these colors as needed
+                       labels = c("0" = "Incorrect", "1" = "Correct")) +
+    theme_minimal() +
+    labs(title = paste("Plot of the predicted threshold for each trial for a duration (µs) of ",levels(factor(duration_level))[i]),
+         subtitle = "Faces task",
+         x = "Trials number",
+         y = "Predicted threshold/Contrast") +
+    theme(legend.position = "right",
+          legend.box = "vertical")+
+    geom_hline(yintercept = threshold_50, linetype = "dashed", color = "red")
+}
+
+plot_stair_objects <- function(data, duration_level, threshold_50){
+  ggplot(data = data , aes(x = trial_n)) +
+    geom_point(aes(y = updated_threshold, colour = factor(resp))) +
+    geom_line(aes(y = updated_threshold, linetype = "Threshold"), color = "black") +
+    geom_line(aes(y = contrast_test, linetype = "Contrast"), color = "black") +
+    scale_linetype_manual(name = "Lines",
+                        values = c("Threshold" = "solid", "Contrast" = "dashed")) +
+    scale_color_manual(name = "Response",
+                       values = c("0" = "red", "1" = "lightgreen"),  # Adjust these colors as needed
+                       labels = c("0" = "Incorrect", "1" = "Correct")) +
+    theme_minimal() +
+    labs(title = paste("Plot of the predicted threshold for each trial for a duration (µs) of ",levels(factor(duration_level))[i]),
+         subtitle = "Objects task",
+         x = "Trials number",
+         y = "Predicted threshold/Contrast") +
+    theme(legend.position = "right",
+          legend.box = "vertical")+
+    geom_hline(yintercept = threshold_50, linetype = "dashed", color = "red")
+}
+
+plot_stair_landscapes <- function(data, duration_level, threshold_50){
+  ggplot(data = data , aes(x = trial_n)) +
+    geom_point(aes(y = updated_threshold, colour = factor(resp))) +
+    geom_line(aes(y = updated_threshold, linetype = "Threshold"), color = "black") +
+    geom_line(aes(y = contrast_test, linetype = "Contrast"), color = "black") +
+    scale_linetype_manual(name = "Lines",
+                        values = c("Threshold" = "solid", "Contrast" = "dashed")) +
+    scale_color_manual(name = "Response",
+                       values = c("0" = "red", "1" = "lightgreen"),  # Adjust these colors as needed
+                       labels = c("0" = "Incorrect", "1" = "Correct")) +
+    theme_minimal() +
+    labs(title = paste("Plot of the predicted threshold for each trial for a duration (µs) of ",levels(factor(duration_level))[i]),
+         subtitle = "Landscapes task",
+         x = "Trials number",
+         y = "Predicted threshold/Contrast") +
+    theme(legend.position = "right",
+          legend.box = "vertical")+
+    geom_hline(yintercept = threshold_50, linetype = "dashed", color = "red")
+}
+
+par(mar = c(6, 5, .1, .1))
+#We then loop each of the three function above to create 10 plots for each task (one plot per durations per task)
+for (i in 1:10) {
+  print(
+    plot_stair_faces(
+      data = subsets_faces[[i]],
+      duration_level = levels(factor(contr_faces$duration_test))[i],
+      threshold_50 = final_thresholds_faces[i]
+    )
+  )
+}
+
+for (i in 1:10) {
+  print(
+    plot_stair_objects(
+      data = subsets_objects[[i]],
+      duration_level = levels(factor(contr_objects$duration_test))[i],
+      threshold_50 = final_thresholds_objects[i]
+    )
+  )
+}
+
+for (i in 1:10) {
+  print(
+    plot_stair_landscapes(
+      data = subsets_landscapes[[i]],
+      duration_level = levels(factor(contr_landscape$duration_test))[i],
+      threshold_50 = final_thresholds_landscapes[i]
+    )
+  )
+}
+```
+
+
+```{r}
+
+
+final_thresholds_faces <- sapply(1:10, function(i) subsets_faces[[i]]$updated_threshold[50])
+final_thresholds_objects <- sapply(1:10, function(i) subsets_objects[[i]]$updated_threshold[50])
+final_thresholds_landscapes <- sapply(1:10, function(i) subsets_landscapes[[i]]$updated_threshold[50])
+
+
+final_contrasts_faces <- sapply(1:10, function(i) subsets_faces[[i]]$contrast_test[50])
+final_contrasts_objects <- sapply(1:10, function(i) subsets_objects[[i]]$contrast_test[50])
+final_contrasts_landscapes <- sapply(1:10, function(i) subsets_landscapes[[i]]$contrast_test[50])
+DurationF <- c(500, 901, 1623, 2924, 5268, 9491, 17100, 30808, 55505, 1e+05)
+
+
+data_faces <- data.frame(final_thresholds_faces,final_contrasts_faces,DurationF)
+Fil_data_faces <- subset(data_faces, final_thresholds_faces < 99)
+
+data_objects <- data.frame(final_thresholds_objects,final_contrasts_objects,DurationF)
+Fil_data_objects <- subset(data_objects, final_thresholds_faces < 99)
+
+data_landscapes <- data.frame(final_thresholds_landscapes,final_contrasts_landscapes,DurationF)
+Fil_data_landscapes <- subset(data_landscapes, final_thresholds_landscapes < 99)
+
+inverse_relationship_faces <- ggplot(data = Fil_data_faces, aes(final_contrasts_faces, final_thresholds_faces,label = factor(DurationF)))  + geom_point() + geom_text_repel() + theme_classic() + 
+  labs(title = "final Threshold depending of the final contrast", 
+       subtitle = "the numbers indicate the duration in µs" ,
+       x = "Contrast", 
+       y = "Final treshold",
+       caption = "faces task")
+
+inverse_relationship_objects<- ggplot(data = Fil_data_objects, aes(final_contrasts_objects, final_thresholds_objects,label = factor(DurationF)))  + geom_point() + geom_text_repel() + theme_classic() + 
+  labs(title = "final Threshold depending of the final contrast",
+       subtitle = "the numbers indicate the duration in µs" , 
+       x = "Contrast", 
+       y = "Final treshold", 
+       caption = "objects task")
+
+inverse_relationship_landscapes <- ggplot(data = Fil_data_landscapes, aes(final_contrasts_landscapes, final_thresholds_landscapes,label = factor(DurationF)))  + geom_point() + geom_text_repel() + theme_classic() + 
+  labs(title = "final Threshold depending of the final contrast",
+       subtitle = "the numbers indicate the duration in µs" ,
+       x = "Contrast",
+       y = "Final treshold", 
+       caption = "landscapes task")
+
+
+
+
+
+inverse_relationship_faces
+inverse_relationship_landscapes
+inverse_relationship_objects
+
+```
+
+```{r}
+duration_contrast_l <- ggplot(data = Fil_data_landscapes, aes(final_contrasts_landscapes, DurationF))  + geom_point()  + theme_classic() + 
+  labs(title = "final Threshold~duration",
+       x = "Duration",
+       y = "Final treshold", 
+       caption = "landscapes task")
+
+duration_contrast_f <- ggplot(data = Fil_data_faces, aes(final_contrasts_faces, DurationF))  + geom_point()  + theme_classic() + 
+  labs(title = "final Threshold~duration",
+       x = "Duration",
+       y = "Final treshold", 
+       caption = "landscapes task")
+
+duration_contrast_l
+duration_contrast_f
+head(Fil_data_faces)
+```
+
+```{r}
+
+Energy_duration_plot_l <- ggplot(Fil_data_landscapes, aes(x = DurationF, y = final_contrasts_landscapes*DurationF)) + geom_point() + labs(title = "Plot of Energy (duration x contrast) by duration ", y = "Energy", x="Durations", subtitle = "Landscapes task") +theme_classic()
+
+LogEnergy_Logduration_plot_l <- ggplot(Fil_data_landscapes, aes(x = log(DurationF), y = log(final_contrasts_landscapes*DurationF))) + geom_point() + labs(title = "Plot of Energy (duration x contrast) by duration ", y = "log(Energy)", x="log(Duration)", subtitle = "Landscapes task") +theme_classic()
+
+Energy_duration_plot_l
+LogEnergy_Logduration_plot_l
+
+Energy_duration_plot_f <- ggplot(Fil_data_faces, aes(x = DurationF, y = final_contrasts_faces*DurationF)) + geom_point() + labs(title = "Plot of Energy (duration x contrast) by duration ", y = "Energy", x="Durations", subtitle = "Faces task") +theme_classic()
+
+LogEnergy_Logduration_plot_f <- ggplot(Fil_data_faces, aes(x = log(DurationF), y = log(final_contrasts_faces*DurationF))) + geom_point() + labs(title = "Plot of Energy (duration x contrast) by duration ", y = "log(Energy)", x="log(Duration)", subtitle = "Faces task") +theme_classic()
+
+Energy_duration_plot_f
+LogEnergy_Logduration_plot_f
+
+Energy_duration_plot_o <- ggplot(Fil_data_objects, aes(x = DurationF, y = final_contrasts_objects*DurationF)) + geom_point() + labs(title = "Plot of Energy (duration x contrast) by duration ", y = "Energy", x="Durations", subtitle = "objects task") +theme_classic()
+
+LogEnergy_Logduration_plot_o <- ggplot(Fil_data_objects, aes(x = log(DurationF), y = log(final_contrasts_objects*DurationF))) + geom_point() + labs(title = "Plot of Energy (duration x contrast) per duration ", y = "log(Energy)", x="log(Duration)", subtitle = "objects task") +theme_classic()
+
+Energy_duration_plot_o
+LogEnergy_Logduration_plot_o
+```
