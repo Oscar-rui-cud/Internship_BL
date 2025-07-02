@@ -1,0 +1,321 @@
+---
+title: "Analysis_test_BL_Discr"
+author: "oscar"
+date: "2025-07-02"
+output: html_document
+---
+I just need to import "Final_data" from "Data_extractor_discr.Rmd" and this script should work. It is still very messy and there is a lot of unecessary thing I must put things in order but not now.
+
+# Data analysis
+
+Now lets try a Bayesian aproach
+```{r}
+library(brms)
+library(BH)
+Final_data$E <- scale(Final_data$energy)
+Final_data$T <- scale(Final_data$updated_threshold)
+Final_data$D <- scale(Final_data$duration)
+Final_data$Ldu <- log(Final_data$duration)
+Final_data$Len <- log(Final_data$energy) 
+model1 <- brm( Len ~ Ldu , data = Final_data, family = gaussian
+)
+
+```
+
+```{r}
+library(tidyverse)
+library(tidybayes)
+library(rethinking)
+library(gganimate)
+library(modelr)  
+mod_fits <- tibble(Ldu = seq_range(Final_data$Ldu, 100)) %>% 
+  add_epred_draws(model1) %>%
+  group_by(Ldu) %>%
+  mean_qi(.epred, .width = 0.89)
+
+mod_preds <- tibble(Ldu = seq_range(Final_data$Ldu, 100)) %>% 
+  add_predicted_draws(model1) %>%
+  group_by(Ldu) %>%
+  mean_qi(.prediction, .width = 0.89)
+
+ggplot(Final_data, aes(x = Ldu)) +
+  geom_point(aes(y = Len, alpha = 0.4, colour = task)) +
+  geom_ribbon(data = mod_preds, aes(ymin = .lower, ymax = .upper),
+              alpha = 0.2) +
+  geom_lineribbon(data = mod_fits,
+                  aes(y = .epred, ymin = .lower, ymax = .upper),
+                  fill = "grey50", linewidth = 0.5) +
+  labs(x = "Log(duration)", y = "energy") + theme_classic()
+```
+# Let's add a task as a categorical variable
+
+
+```{r}
+model2 <- brm(Len ~ Ldu * task , data = Final_data, family = gaussian
+)
+
+summary(model2)
+```
+
+```{r}
+ce = conditional_effects(model2)
+pred.dat = tibble(task = unique(Final_data$task), 
+                  Ldu =mean(Final_data$Ldu))
+
+# Get posterior draws at the values in pred.dat
+post.epred = epred_draws(model2, newdata=pred.dat)
+
+# Generate conditional effects plots. This is a list of two plots, one for Species and one for Petal.Length
+pce = plot(ce, ask=FALSE, plot=FALSE)
+
+pce[["task"]] + 
+  geom_violin(data=post.epred, 
+              inherit.aes=FALSE, fill=NA, colour="red",
+              aes(task, .epred)) + labs(y = "Log(energy)") + theme_classic() 
+```
+
+```{r}
+
+```
+
+```{r}
+Final_data%>%
+  group_by(task) %>%
+  data_grid(Ldu = seq_range(Ldu, n = 105)) %>%
+  add_epred_draws(model2) %>%
+  ggplot(aes(x = Ldu, y = Len, color = ordered(task))) +
+  stat_lineribbon(aes(y = .epred)) +
+  geom_point(data = Final_data) +
+  scale_fill_brewer(palette = "Greys") +
+  scale_color_brewer(palette = "Set2")
+```
+
+```{r}
+Final_data %>%
+  group_by(task) %>%
+  data_grid(Ldu = seq_range(Ldu, n = 101)) %>%
+  add_predicted_draws(model2) %>%
+  ggplot(aes(x = Ldu, y = Len, color = ordered(task), fill = ordered(task))) +
+  stat_lineribbon(aes(y = .prediction), .width = c(.95, .80, .50), alpha = 1/4) +
+  geom_point(data = Final_data) +
+  scale_fill_brewer(palette = "Set2") +
+  scale_color_brewer(palette = "Dark2") + labs(x = "Log(duration)", y = "Log(energy)", title = "model2's predictions (Log(energy)~Log(duration) * task)  ") + theme_classic()
+```
+
+
+# Adding some mix to the twist
+## first 
+```{r}
+bayes_factor(model2,model1)
+
+loo(model2)
+```
+```{r}
+model3 <- brm(Len ~ Ldu + (Ldu|task) + (Ldu|subj), data = Final_data, family = gaussian, save_pars = save_pars(all = T)
+)
+```
+```{r}
+plot(model3)
+
+loo1 <- loo(model1)
+loo2 <- loo(model2)
+loo3 <- loo(model3)
+
+loo_compare(loo1,loo2,loo3)
+```
+```{r}
+conditional_effects(model3, effects = "Ldu")
+conditional_effects(model3, effects = "Ldu", re_formula = ~ (Ldu | task))  # For task-specific slopes
+conditional_effects(model3, effects = "Ldu", re_formula = ~ (Ldu | subj))  # For subject-specific slopes
+
+pp_check(model2, ndraws = 100) + ggtitle("posterior predictive checks models2")
+pp_check(model3, ndraws = 100) + ggtitle("posterior predictive checks models3")
+dens(Final_data$Len)
+```
+```{r}
+pp_check(model3, ndraws = 100)  # shows dens_overlay plot by default
+pp_check(model3, type = "error_hist", ndraws = 11)
+pp_check(model2, type = "scatter_avg", ndraws = 100)
+pp_check(model3, type = "scatter_avg", ndraws = 100)
+pp_check(model3, type = "stat_2d")
+pp_check(model3, type = "loo_pit")
+pp_check(model2, type = "loo_pit")
+pp_check(model3, prefix = "ppd")
+hist(posterior_predict(model3))
+hist(Final_data$Len)
+```
+
+```{r}
+modelN <- brm(formula = Len ~ 1 + (1|task) + (1|subj), data = Final_data, save_pars = save_pars(all = T), family = gaussian)
+
+```
+```{r}
+pp_check(modelN, ndraws = 100)
+
+looN <- loo(modelN)
+
+loo_compare(looN,loo3,loo2)
+# we got rid of model 4 which was focusing on modelling the inter-individual variation
+
+
+pp_check(modelN, type = "scatter_avg", ndraws = 100)
+bayes_factor(model3,modelN, log = T)
+
+# H0 : duration have an effect on energy, H1: there is an effect of duration on energy
+
+#So because the bayes factor is >>> 20 we can reject H0 so because there is likely an effect of duration on energy the bloch law is violated for discrimination of complex stimuli
+```
+
+```{r}
+contraPlot <- ggplot(data = Final_data, aes(y = Ldu, x = contrast)) + geom_jitter(aes(colour = task))
+contraPlot
+
+
+Mcdonald <- brm(contrast ~ Ldu + (Ldu|subj) + (Ldu|task), data = Final_data, save_pars = save_pars(all=T))
+pp_check(Mcdonald, ndraws = 100)
+pp_check(Mcdonald, type = "scatter_avg", ndraws = 100)
+```
+
+```{r}
+Final_object <- subset(Final_data, Final_data$task == "objects")
+Final_face <- subset(Final_data, Final_data$task == "faces")
+Final_landscape <- subset(Final_data, Final_data$task == "landscapes")
+
+object_energyP <- ggplot(Final_object, aes(x=Ldu)) + geom_point(aes(y= contrast)) + geom_line(aes(y=contrast, color = subj)) + labs(title = "Objects task Fil") + theme_minimal()
+object_energyP
+
+
+Face_energyP <- ggplot(Final_face, aes(x=Ldu)) + geom_point(aes(y= contrast)) + geom_line(aes(y=contrast, color = subj)) + labs(title = "Faces task Fil") + theme_minimal()
+Face_energyP
+
+
+landscape_energyP <- ggplot(Final_landscape, aes(x=Ldu)) + geom_point(aes(y= contrast)) + geom_line(aes(y=contrast, color = subj)) + labs(title = "Landscapes task Fil") + theme_minimal()
+landscape_energyP
+
+```
+
+```{r}
+ID_face <-table(Final_face$subj)
+ID_face
+
+ID_landscape <-table(Final_landscape$subj)
+ID_landscape
+
+ID_object <-table(Final_object$subj)
+ID_object
+#Face model#|||||||||||| + all other task model of Len ~ Ldu
+################ 
+
+modelFace <- brm(data = Final_face, formula = Len~Ldu + (Ldu|subj), save_pars = save_pars(all=T))
+plot(modelFace, point = T)
+pp_check(modelFace, ndraws = 100)
+
+modelFaceNull <- brm(data = Final_face, formula = Len~ 1 + (1|subj), save_pars = save_pars(all=T))
+pp_check(modelFaceNull,ndraws = 100)
+
+modelFacLoo <- loo(modelFace)
+modelFacNullLoo <- loo(modelFaceNull)
+loo_compare(modelFacLoo,modelFacNullLoo)
+
+bayes_factor(modelFace,modelFaceNull, log = T)
+
+
+
+#Object model#||||||||||
+##########
+modelobject <- brm(data = Final_object, formula = Len~Ldu + (Ldu|subj), save_pars = save_pars(all=T))
+plot(modelobject, point = T)
+pp_check(modelobject, ndraws = 100)
+
+modelobjectNull <- brm(data = Final_object, formula = Len~ 1 + (1|subj), save_pars = save_pars(all=T))
+pp_check(modelobjectNull,ndraws = 100)
+
+modelFacLoo <- loo(modelobject)
+modelFacNullLoo <- loo(modelobjectNull)
+loo_compare(modelFacLoo,modelFacNullLoo)
+
+bayes_factor(modelobject,modelobjectNull, log = T)
+
+
+
+#Landscape model#|||||||
+############
+modelobject <- brm(data = Final_object, formula = Len~Ldu + (Ldu|subj), save_pars = save_pars(all=T))
+plot(modelobject, point = T)
+pp_check(modelobject, ndraws = 100)
+
+modelobjectNull <- brm(data = Final_object, formula = Len~ 1 + (1|subj), save_pars = save_pars(all=T))
+pp_check(modelobjectNull,ndraws = 100)
+
+modelFacLoo <- loo(modelobject)
+modelFacNullLoo <- loo(modelobjectNull)
+loo_compare(modelFacLoo,modelFacNullLoo)
+
+bayes_factor(modelobject,modelobjectNull, log = T)
+
+
+```
+
+```{r}
+modelobject_C <- brm(data = Final_object, formula = contrast~Ldu + (Ldu|subj), save_pars = save_pars(all=T))
+plot(modelobject_C, point = T)
+pp_check(modelobject_C, ndraws = 100)
+
+modelobjectNull_C <- brm(data = Final_object, formula = contrast~ 1 + (1|subj), save_pars = save_pars(all=T))
+pp_check(modelobjectNull,ndraws = 100)
+
+modelFacLoo_C <- loo(modelobject_C)
+modelFacNullLoo_C <- loo(modelobjectNull_C)
+loo_compare(modelFacLoo_C,modelFacNullLoo_C)
+
+bayes_factor(modelobject_C,modelobjectNull_C, log = T)
+
+
+
+
+```
+
+```{r}
+library(dplyr)
+library(broom)
+
+# Fit linear model for each participant and extract coefficients
+individual_slopes <- Final_data %>%
+  group_by(subj,task) %>%  # Replace with your actual ID column name
+  do(tidy(lm(contrast ~ Ldu, data = .))) %>%
+  filter(term == "Ldu") %>%  # Extract just the slope coefficients
+  select(subj, estimate) %>%  # Keep only ID and slope estimate
+  rename(slope = estimate)  # Rename for clarity
+
+individual_slopes
+#with this we can get rid of subj 08 in the face task and of subj 04 in the faces task as well
+Final_faceFil <- Final_face[!(Final_face$subj %in% c("04","08")),]
+
+
+modelface_C <- brm(data = Final_faceFil, formula = contrast~Ldu + (Ldu|subj), save_pars = save_pars(all=T))
+plot(modelface_C, points = T)
+pp_check(modelface_C, ndraws = 100)
+
+modelfaceNull_C <- brm(data = Final_faceFil, formula = contrast~ 1 + (1|subj), save_pars = save_pars(all=T))
+pp_check(modelfaceNull_C,ndraws = 100)
+
+modelFacLoo_C <- loo(modelface_C)
+modelFacNullLoo_C <- loo(modelfaceNull_C)
+loo_compare(modelFacLoo_C,modelFacNullLoo_C)
+
+bayes_factor(modelface_C,modelfaceNull_C, log = T)
+
+
+PPD_1 <- posterior_predict(modelface_C)
+PPD_2 <- posterior_predict(modelfaceNull_C)
+
+posteriors <- c(PPD_1, PPD_2)
+id <- c(rep("posterior H1",344000),rep("posterior H0",344000))
+d <- data.frame(posteriors,id)  
+
+hist(PPD_1)
+hist(PPD_2)
+ggplot(data = d, aes(x= posteriors, colour = id)) + geom_density()
+
+
+```
