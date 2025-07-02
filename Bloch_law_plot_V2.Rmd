@@ -17,9 +17,9 @@ library(ggrepel)
 #Change the number xx_faces_discr/BL_faces_xx_data_table.csv" and re-run all chunck to see the plot of another participant number xx
 
 
-discr_landscape <- read_csv("/home/ruiz/Documents/Stage_brxl/DATA_BOCH_LAW/03_landscapes_discr/BL_landscapes_03_data_table.csv")
-discr_faces <- read_csv("/home/ruiz/Documents/Stage_brxl/DATA_BOCH_LAW/03_faces_discr/BL_faces_03_data_table.csv")
-discr_objects <- read_csv("/home/ruiz/Documents/Stage_brxl/DATA_BOCH_LAW/03_objects_discr/BL_objects_03_data_table.csv")
+discr_landscape <- read_csv("/home/ruiz/Documents/Stage_brxl/DATA_BOCH_LAW/DIS/subj_03_bloch_law_landscapes_discr/BL_landscapes_03_data_table.csv")
+discr_faces <- read_csv("/home/ruiz/Documents/Stage_brxl/DATA_BOCH_LAW/DIS/subj_03_bloch_law_faces_discr/BL_faces_03_data_table.csv")
+discr_objects <- read_csv("/home/ruiz/Documents/Stage_brxl/DATA_BOCH_LAW/DIS/subj_03_bloch_law_objects_discr/BL_objects_03_data_table.csv")
 
 # we use head to check if each data set are imported properly.
 head(discr_objects)
@@ -74,18 +74,18 @@ final_contrasts_landscapes <- sapply(1:10, function(i) subsets_landscapes[[i]]$c
 Now we create plot of updated threshold for each trials of each duration to see if the algorithm is working. If it worked we should see stair like plot that converge to a certain value at the 50th trials. If we dont see any stair shape it mean that it didn't work properly, and if the value to which the updated threshold converge is 100 or > 99 it mean that we can't find the "true" threshold wihin our contrasts range. So theses value will be filtered later.
 
 ```{r, echo=FALSE,fig.show="hold", out.width="50%"}
-plot_stair_faces <- function(data, duration_level, threshold_50){
-  ggplot(data = data , aes(x = trial_n)) +
+plot_stair_faces <- function(datas, duration_level, threshold_50){
+  ggplot(data = datas , aes(x = trial_n)) +
     geom_point(aes(y = updated_threshold, colour = factor(correct))) +
     geom_line(aes(y = updated_threshold, linetype = "Threshold"), color = "black") +
     geom_line(aes(y = contrast, linetype = "Contrast"), color = "black") +
     scale_linetype_manual(name = "Lines",
                         values = c("Threshold" = "solid", "Contrast" = "dashed")) +
     scale_color_manual(name = "Response",
-                       values = c("0" = "red", "1" = "lightgreen"),  # Adjust these colors as needed
+                       values = c("0" = "red", "1" = "lightgreen"), 
                        labels = c("0" = "Incorrect", "1" = "Correct")) +
     theme_minimal() +
-    labs(title = paste("Plot of the predicted threshold for each trial for a duration (µs) of ",levels(factor(duration))[i]),
+    labs(title = paste("Plot of the predicted threshold for each trial for a duration (µs) of ",levels(factor(duration_level)[i])),
          subtitle = "Faces task",
          x = "Trials number",
          y = "Predicted threshold/Contrast") +
@@ -94,18 +94,18 @@ plot_stair_faces <- function(data, duration_level, threshold_50){
     geom_hline(yintercept = threshold_50, linetype = "dashed", color = "red")
 }
 
-plot_stair_objects <- function(data, duration_level, threshold_50){
-  ggplot(data = data , aes(x = trial_n)) +
+plot_stair_objects <- function(datas, duration_level, threshold_50){
+  ggplot(data = datas , aes(x = trial_n)) +
     geom_point(aes(y = updated_threshold, colour = factor(correct))) +
     geom_line(aes(y = updated_threshold, linetype = "Threshold"), color = "black") +
     geom_line(aes(y = contrast, linetype = "Contrast"), color = "black") +
     scale_linetype_manual(name = "Lines",
                         values = c("Threshold" = "solid", "Contrast" = "dashed")) +
     scale_color_manual(name = "Response",
-                       values = c("0" = "red", "1" = "lightgreen"),  # Adjust these colors as needed
+                       values = c("0" = "red", "1" = "lightgreen"), 
                        labels = c("0" = "Incorrect", "1" = "Correct")) +
     theme_minimal() +
-    labs(title = paste("Plot of the predicted threshold for each trial for a duration (µs) of ",levels(factor(duration))[i]),
+    labs(title = paste("Plot of the predicted threshold for each trial for a duration (µs) of ",levels(factor(duration_level))[i]),
          subtitle = "Objects task",
          x = "Trials number",
          y = "Predicted threshold/Contrast") +
@@ -114,18 +114,18 @@ plot_stair_objects <- function(data, duration_level, threshold_50){
     geom_hline(yintercept = threshold_50, linetype = "dashed", color = "red")
 }
 
-plot_stair_landscapes <- function(data, duration_level, threshold_50){
-  ggplot(data = data , aes(x = trial_n)) +
+plot_stair_landscapes <- function(datas, duration_level, threshold_50){
+  ggplot(data = datas , aes(x = trial_n)) +
     geom_point(aes(y = updated_threshold, colour = factor(correct))) +
     geom_line(aes(y = updated_threshold, linetype = "Threshold"), color = "black") +
     geom_line(aes(y = contrast, linetype = "Contrast"), color = "black") +
     scale_linetype_manual(name = "Lines",
                         values = c("Threshold" = "solid", "Contrast" = "dashed")) +
     scale_color_manual(name = "Response",
-                       values = c("0" = "red", "1" = "lightgreen"),  # Adjust these colors as needed
+                       values = c("0" = "red", "1" = "lightgreen"), 
                        labels = c("0" = "Incorrect", "1" = "Correct")) +
     theme_minimal() +
-    labs(title = paste("Plot of the predicted threshold for each trial for a duration (µs) of ",levels(factor(duration))[i]),
+    labs(title = paste("Plot of the predicted threshold for each trial for a duration (µs) of ",levels(factor(duration_level))[i]),
          subtitle = "Landscapes task",
          x = "Trials number",
          y = "Predicted threshold/Contrast") +
