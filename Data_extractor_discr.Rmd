@@ -1,0 +1,189 @@
+---
+title: "Final_data_extractor"
+author: "oscar"
+date: "2025-06-18"
+output: html_document
+---
+
+In this script we are going to extract the final threshold and contrast for each durations of each tasks for each subjects of the discrimination experiment. we will then merged these data into a big dataframe that would be useable for statistical analysis.
+
+
+# Importing library
+ we import here every library that we want to use
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(readr)
+library(purrr)
+library(dplyr)
+# we should add some for the stats but we are not here yet
+```
+# Importing the data of each participants
+
+
+```{r}
+base_path <- "/home/ruiz/Documents/Stage_brxl/DATA_BOCH_LAW/DIS"
+tasks <- c("landscapes", "faces", "objects")
+participants <- c("01", "02", "03", "04","05","06", "07" , "08" ,"09","10","12","13","14" ,"15", "16", "17")
+
+for (version in participants) {
+  for (category in tasks) {
+    # Construct file path
+    file_path <- file.path(base_path, 
+                          paste0("subj_",version, "_bloch_law_", category, "_discr"),
+                          paste0("BL_", category, "_", version, "_data_table.csv"))
+    
+    # Create variable name
+    var_name <- paste0(toupper(substr(category, 1, 1)), "_", version)
+    
+    # Import and assign
+    assign(var_name, read_csv(file_path))
+    message("Imported: ", var_name)
+  }
+}
+
+```
+Add a "task" column that contain F, L or O depending of the task (faces, landscapes, objects)
+
+```{r}
+
+add_task_column <- function(df, category) {
+  df %>% mutate(task = category)
+}
+
+prefix_task_map <- list(
+  "L" = "landscapes",
+  "F" = "faces",
+  "O" = "objects"
+)
+
+
+all_vars <- ls(pattern = "^(L|F|O)_[0-9]{2}$")
+
+
+for (var_name in all_vars) {
+  prefix <- substr(var_name, 1, 1)  
+  task <- prefix_task_map[[prefix]]  
+  assign(var_name, add_task_column(get(var_name), task))
+}
+
+```
+
+
+
+## trials 500 to 50 per durations
+
+```{r}
+#A function to split the data in groups of durations
+split_by_factor <- function(data, factor_var) {
+  # Convert variable to factor if it isn't already
+  if (!is.factor(data[[factor_var]])) {
+    data[[factor_var]] <- factor(data[[factor_var]])
+  }
+  
+  # Split data frame into list of subsets
+  split(data, data[[factor_var]])
+}
+
+
+#we are calling every object that got a name with L,F,O then _ and a number so we are calling the name of each of our dataset
+dataset_names <- ls(pattern = "^[LFO]_[0-9]{2}$")
+
+#we create an empty list so we can fill it with the result of process_split_trials
+split_results <- list()
+
+# we make a loop to split each dataset in durations groups
+for (ds_name in dataset_names) {
+  dataset <- get(ds_name)
+  
+  split_data <- split_by_factor(dataset, "duration")
+
+  result_name <- paste0(ds_name, "_split_by_", "duration")
+  split_results[[result_name]] <- split_data
+}
+
+
+
+# weird deepseek function (use a lot of tidyverse and dplyr and I dont know much about it) but it seem to work will have to look into it more indeepth 
+process_split_trials_safe <- function(split_data) {
+  # Recursive function to handle nested lists
+  modify_structure <- function(x) {
+    if (is.data.frame(x)) {
+      # This is a dataframe - process it
+      x %>% 
+        {if ("trial_n" %in% names(.)) select(., -trial_n) else .} %>%
+        mutate(trials = 1:n())
+    } else if (is.list(x)) {
+      # This is a list - recurse deeper
+      lapply(x, modify_structure)
+    } else {
+      # This is something else (character, etc.) - leave unchanged
+      x
+    }
+  }
+  
+  modified_data <- modify_structure(split_data)
+  return(modified_data)
+}
+
+split_results <- process_split_trials_safe(split_results)
+
+```
+
+## Merging each of these into a big data set 
+
+
+```{r}
+
+#extract all data frames
+extract_dfs <- function(x) {
+  if (is.data.frame(x)) {
+    list(x)
+  } else if (is.list(x)) {
+    unlist(lapply(x, extract_dfs), recursive = FALSE)
+  } else {
+    NULL
+  }
+}
+
+#Un-nest the list
+all_dfs <- extract_dfs(split_results)
+
+#Everythings become one
+Big_data <- do.call(rbind, lapply(seq_along(all_dfs), function(i) {
+  cbind(all_dfs[[i]], group_id = names(all_dfs)[i])
+}))
+
+
+```
+
+# Now we can extract what interest us the most which is the final Threshold, Contrast for each durations
+
+```{r}
+Big_data <- subset(na.omit(Big_data))
+Big_data <- subset(Big_data, updated_threshold < 99)
+Final_data <- subset(Big_data, trials == max(trials))
+
+#We can aslo add a Energy column which is the product of Duration and contrast
+
+Final_data$duration <- as.numeric(as.character(Final_data$duration))
+energy <- c(Final_data$duration * Final_data$contrast)
+Final_data <- data.frame(Final_data, energy)
+
+
+#plot(Final_data$updated_threshold~Final_data$duration)
+
+
+
+den_plot <- ggplot(data= Final_data, aes(x=updated_threshold)) + geom_density()
+
+den_plot
+
+ploploplot <- ggplot(data = Final_data, aes(y = energy, x =duration)) + geom_jitter(aes(color = task)) + theme_classic()
+ploploplot
+
+logploplot <- ggplot(data = Final_data, aes(y = log(energy), x = log(duration))) + geom_jitter(aes(color = task)) + theme_classic()
+logploplot
+
+```
+I still need to add some plot similar to the one in the contrast task script to check if any participants is doing anything out the ordinary.
