@@ -1,0 +1,335 @@
+---
+title: "Data_extractor_contr"
+author: "oscar"
+date: "2025-06-20"
+output: html_document
+---
+In this script we are going to extract the final threshold and contrast for each durations of each tasks for each subjects of the discrimination experiment. we will then merged these data into a big dataframe that would be useable for statistical analysis. 
+
+We got rid of 05 and 06 because their data were shit they certainly didn't understood the task.
+
+# Importing library
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(readr)
+library(purrr)
+library(dplyr)
+library(dagitty)
+# we should add some for the stats but we are not here yet
+```
+# Importing the data of each participants
+
+We got rid of 05 and 06 because their data were shit (I also really want to get rid of 04 bc she got weird result and wasn't focus on the task during the experiment)
+
+```{r}
+base_path <- "/home/ruiz/Documents/Stage_brxl/DATA_BOCH_LAW/PSE"
+tasks <- c("landscapes", "faces", "objects")
+participants <- c("01", "02", "03", "04" ,"07","08","09", "10","11","12","13","14","15","16","18")
+#Getting rid of 06 and 05 because their data were shit
+for (participant in participants) {
+  for (category in tasks) {
+    # Construct file path
+    file_path <- file.path(base_path, 
+                          paste0("subj_",participant, "_bloch_law_", category, "_PSE"),
+                          paste0("BL_", category, "_PSE_", participant, "_data_table.csv"))
+
+    # Create variable name
+    var_name <- paste0(toupper(substr(category, 1, 1)), "_", participant)
+    
+    # Import and assign
+    assign(var_name, read_csv(file_path))
+    message("Imported: ", var_name)
+  }
+}
+
+```
+Add a "task" column that contain F, L or O depending of the task (faces, landscapes, objects)
+```{r}
+add_task_column <- function(df, category) {
+  df %>% mutate(task = category)
+}
+#split_results <- list()
+#Landscapes <- ls(pattern = "^[L]_[0-9]{2}$")
+#lapply(Landscapes, add_task_column)
+
+prefix_task_map <- list(
+  "L" = "landscapes",
+  "F" = "faces",
+  "O" = "objects"
+)
+
+
+all_vars <- ls(pattern = "^(L|F|O)_[0-9]{2}$")
+
+
+for (var_name in all_vars) {
+  prefix <- substr(var_name, 1, 1)  
+  task <- prefix_task_map[[prefix]]  
+  assign(var_name, add_task_column(get(var_name), task))
+}
+
+```
+
+## trials 500 to 50 per durations
+
+```{r}
+#A function to split the data in groups of durations
+split_by_factor <- function(data, factor_var) {
+  # Convert variable to factor if it isn't already
+  if (!is.factor(data[[factor_var]])) {
+    data[[factor_var]] <- factor(data[[factor_var]])
+  }
+  
+  # Split data frame into list of subsets
+  split(data, data[[factor_var]])
+}
+
+
+#we are calling every object that got a name with L,F,O then _ and a number so we are calling the name of each of our dataset
+dataset_names <- ls(pattern = "^[LFO]_[0-9]{2}$")
+
+#we create an empty list so we can fill it with the result of process_split_trials
+split_results <- list()
+
+# we make a loop to split each dataset in durations groups
+for (name in dataset_names) {
+  dataset <- get(name)
+  
+  split_data <- split_by_factor(dataset, "duration_test")
+
+  result_name <- paste0(name, "_split_by_", "duration_test")
+  split_results[[result_name]] <- split_data
+}
+
+
+
+# weird deepseek function (use a lot of tidyverse and dplyr and I dont know much about it) but it seem to work will have to look into it more indeepth 
+process_split_trials_safe <- function(split_data) {
+  # Recursive function to handle nested lists
+  modify_structure <- function(x) {
+    if (is.data.frame(x)) {
+      # This is a dataframe - process it
+      x %>% 
+        {if ("trial_n" %in% names(.)) select(., -trial_n) else .} %>%
+        mutate(trials = 1:n())
+    } else if (is.list(x)) {
+      # This is a list - recurse deeper
+      lapply(x, modify_structure)
+    } else {
+      # This is something else (character, etc.) - leave unchanged
+      x
+    }
+  }
+  
+  modified_data <- modify_structure(split_data)
+  return(modified_data)
+}
+
+split_results <- process_split_trials_safe(split_results)
+
+```
+
+
+## Merging each of these into a big data set 
+
+
+```{r}
+
+#extract all data frames
+extract <- function(x) {
+  if (is.data.frame(x)) {
+    list(x)
+  } else if (is.list(x)) {
+    unlist(lapply(x, extract), recursive = FALSE)
+  } else {
+    NULL
+  }
+}
+
+#Un-nest the list
+all <- extract(split_results)
+
+#Everythings become one
+Big_data <- do.call(rbind, lapply(seq_along(all), function(i) {
+  cbind(all[[i]], group_id = names(all)[i])
+}))
+
+UnBig_data <- Big_data
+```
+
+
+# Now we can extract what interest us the most which is the final Threshold, Contrast for each durations
+We simply have to save Final_data into our computer and we will use it to do the data analysis
+```{r}
+
+Big_data_noNA <- na.omit(Big_data)
+Big_data_Fi <- subset(Big_data_noNA, updated_threshold < 99 & updated_threshold > 1)
+Final_data <- subset(Big_data_Fi, trials == max(trials)  )
+
+#We can aslo add a Energy column which is the product of Duration and contrast
+
+Final_data$duration_test <- as.numeric(as.character(Final_data$duration_test))
+energy <- c(Final_data$duration_test * Final_data$contrast_test)
+Final_data <- data.frame(Final_data, energy)
+#plot(Final_data$updated_threshold~Final_data$duration)
+Final_data$E <- scale(Final_data$energy)
+Final_data$T <- scale(Final_data$updated_threshold)
+Final_data$D <- scale(Final_data$duration_test)
+Final_data$Ldu <- log(Final_data$duration_test)
+Final_data$Len <- log(Final_data$energy)
+
+
+den_plot <- ggplot(data= Final_data, aes(x=updated_threshold)) + geom_density()
+
+den_plot
+
+ploploplot <- ggplot(data = Final_data, aes(y = energy, x =duration_test)) + geom_jitter(aes(color = task)) + theme_classic()
+ploploplot
+
+logploplot <- ggplot(data = Final_data, aes(y = log(energy), x = duration_test)) + geom_jitter(aes(color = task)) + theme_classic()
+logploplot
+loglogplot <- ggplot(data = Final_data, aes(y = Len, x = Ldu) ) + geom_jitter(aes(color = task)) + theme_classic()
+loglogplot
+
+logpoint <- ggplot(data = Final_data, aes(y = Len, x = Ldu) ) + geom_point(aes(color = task)) + theme_classic()
+logpoint
+```
+Here we check how much of the data point are left for each duration after they have been filtered. If this "conservation" ratio is too low we should get rid of theses durations. It is certainly due to the fact that some short duration are too short for us to be able to find their true threshold which mean that we dont have enough contrast/intensity range to make them perceivable.
+```{r, echo=FALSE,fig.show="hold", out.width="50%"}
+
+
+Final_object <- subset(Final_data, Final_data$task == "objects")
+object_energyP <- ggplot(Final_object, aes(x=Ldu)) + geom_point(aes(y= Len)) + geom_line(aes(y=Len, color = subj)) + labs(title = "Objects task")
+object_energyP
+
+
+Final_Face <- subset(Final_data, Final_data$task == "faces")
+Face_energyP <- ggplot(Final_Face, aes(x=Ldu)) + geom_point(aes(y= Len)) + geom_line(aes(y=Len, color = subj)) + labs(title = "Faces task")
+Face_energyP
+
+Final_landscape <- subset(Final_data, Final_data$task == "landscapes")
+landscape_energyP <- ggplot(Final_landscape, aes(x=Ldu)) + geom_point(aes(y= Len)) + geom_line(aes(y=Len, color = subj)) + labs(title = "Landscapes task")
+landscape_energyP
+
+######################## With unfiltered data
+UNfiltered_data <- subset(UnBig_data, UnBig_data$trials == 50)
+UNfiltered_data$duration_test <- as.numeric(as.character(UNfiltered_data$duration_test))
+UNfiltered_data$Len <- log(UNfiltered_data$contrast_test*UNfiltered_data$duration_test)
+UNfiltered_data$Ldu <- log(UNfiltered_data$duration_test)
+
+C500 <- subset(Final_data, Final_data$duration_test == "500")
+P500 <- subset(UNfiltered_data, UNfiltered_data$duration_test == "500" )
+Conservation_ratio_500 <- length(C500$duration_test)/length(P500$duration_test)
+print(paste("after filtration for a duration of 500 we conserve ",Conservation_ratio_500, " of the datas"))
+
+C901 <- subset(Final_data, Final_data$duration_test == "901")
+P901 <- subset(UNfiltered_data, UNfiltered_data$duration_test == "901" )
+Conservation_ratio_901 <- length(C901$duration_test)/length(P901$duration_test)
+print(paste("after filtration for a duration of 901 we conserve ",Conservation_ratio_901, " of the datas"))
+
+C1623 <- subset(Final_data, Final_data$duration_test == "1623")
+P1623 <- subset(UNfiltered_data, UNfiltered_data$duration_test == "1623" )
+Conservation_ratio_1623 <- length(C1623$duration_test)/length(P1623$duration_test)
+print(paste("after filtration for a duration of 1623 we conserve ",Conservation_ratio_1623," of the datas"))
+
+C2924 <- subset(Final_data, Final_data$duration_test == "2924")
+P2924 <- subset(UNfiltered_data, UNfiltered_data$duration_test == "2924" )
+Conservation_ratio_2924 <- length(C2924$duration_test)/length(P2924$duration_test)
+print(paste("after filtration for a duration of 2924 we conserve ",Conservation_ratio_2924," of the datas"))
+
+
+C5268 <- subset(Final_data, Final_data$duration_test == "5268")
+P5268 <- subset(UNfiltered_data, UNfiltered_data$duration_test == "5268" )
+Conservation_ratio_5268 <- length(C5268$duration_test)/length(P5268$duration_test)
+print(paste("after filtration for a duration of 5268 we conserve ",Conservation_ratio_5268," of the datas"))
+
+C9491 <- subset(Final_data, Final_data$duration_test == "9491")
+P9491 <- subset(UNfiltered_data, UNfiltered_data$duration_test == "9491" )
+Conservation_ratio_9491 <- length(C9491$duration_test)/length(P9491$duration_test)
+print(paste("after filtration for a duration of 9491 we conserve ",Conservation_ratio_9491," of the datas"))
+
+C17100 <- subset(Final_data, Final_data$duration_test == "17100")
+P17100 <- subset(UNfiltered_data, UNfiltered_data$duration_test == "17100" )
+Conservation_ratio_17100 <- length(C17100$duration_test)/length(P17100$duration_test)
+print(paste("after filtration for a duration of 17100 we conserve ",Conservation_ratio_17100," of the datas"))
+
+
+C30808 <- subset(Final_data, Final_data$duration_test == "30808")
+P30808 <- subset(UNfiltered_data, UNfiltered_data$duration_test == "30808" )
+Conservation_ratio_30808 <- length(C30808$duration_test)/length(P30808$duration_test)
+print(paste("after filtration for a duration of 30808 we conserve ",Conservation_ratio_30808," of the datas"))
+
+C55505 <- subset(Final_data, Final_data$duration_test == "55505")
+P55505 <- subset(UNfiltered_data, UNfiltered_data$duration_test == "55505" )
+Conservation_ratio_55505 <- length(C55505$duration_test)/length(P55505$duration_test)
+print(paste("after filtration for a duration of 55505 we conserve ",Conservation_ratio_55505," of the datas"))
+
+C100000 <- subset(Final_data, Final_data$duration_test == "100000")
+P100000 <- subset(UNfiltered_data, UNfiltered_data$duration_test == "100000" )
+Conservation_ratio_100000 <- length(C100000$duration_test)/length(P100000$duration_test)
+print(paste("after filtration for a duration of 100000 we conserve ",Conservation_ratio_100000," of the datas"))
+
+
+UnFinal_object <- subset(UNfiltered_data, UNfiltered_data$task == "objects")
+Unobject_energyP <- ggplot(UnFinal_object, aes(x=Ldu)) + geom_point(aes(y= Len)) + geom_line(aes(y=Len, color = subj)) + labs(title = "Objects task UnFil") + theme_minimal()
+Unobject_energyP
+
+
+UnFinal_Face <- subset(UNfiltered_data, UNfiltered_data$task == "faces")
+UnFace_energyP <- ggplot(UnFinal_Face, aes(x=Ldu)) + geom_point(aes(y= Len)) + geom_line(aes(y=Len, color = subj)) + labs(title = "Faces task UnFil") + theme_minimal()
+UnFace_energyP
+
+UnFinal_landscape <- subset(UNfiltered_data, UNfiltered_data$task == "landscapes")
+Unlandscape_energyP <- ggplot(UnFinal_landscape, aes(x=Ldu)) + geom_point(aes(y= Len)) + geom_line(aes(y=Len, color = subj)) + labs(title = "Landscapes task UnFil") + theme_minimal()
+Unlandscape_energyP
+length(UnBig_data)
+
+Final_duration_data <- subset(Final_data, Final_data$duration_test > 1623) 
+
+levels(factor(Final_duration_data$duration_test))
+cc <- ggplot(Final_duration_data, aes(x=Ldu,y=Len) ) + geom_jitter(aes(color = task))
+cc
+```
+```{r}
+Final_object <- subset(Final_duration_data, task == "objects")
+
+
+
+```
+
+
+
+
+```{r, echo = false, }
+UnFinal_object <- subset(UNfiltered_data, UNfiltered_data$task == "objects")
+Unobject_energyP <- ggplot(UnFinal_object, aes(x=Ldu)) + geom_point(aes(y= contrast_test)) + geom_line(aes(y=contrast_test, color = subj)) + labs(title = "Objects task UnFil") + theme_minimal()
+Unobject_energyP
+
+
+UnFinal_Face <- subset(UNfiltered_data, UNfiltered_data$task == "faces")
+UnFace_energyP <- ggplot(UnFinal_Face, aes(x=Ldu)) + geom_point(aes(y= contrast_test)) + geom_line(aes(y=contrast_test, color = subj)) + labs(title = "Faces task UnFil") + theme_minimal()
+UnFace_energyP
+
+UnFinal_landscape <- subset(UNfiltered_data, UNfiltered_data$task == "landscapes")
+Unlandscape_energyP <- ggplot(UnFinal_landscape, aes(x=Ldu)) + geom_point(aes(y= contrast_test)) + geom_line(aes(y=contrast_test, color = subj)) + labs(title = "Landscapes task UnFil") + theme_minimal()
+Unlandscape_energyP
+########################
+
+
+
+object_energyP <- ggplot(Final_object, aes(x=Ldu)) + geom_point(aes(y= contrast_test)) + geom_line(aes(y=contrast_test, color = subj)) + labs(title = "Objects task Fil") + theme_minimal()
+object_energyP
+
+
+
+Face_energyP <- ggplot(Final_Face, aes(x=Ldu)) + geom_point(aes(y= contrast_test)) + geom_line(aes(y=contrast_test, color = subj)) + labs(title = "Faces task Fil") + theme_minimal()
+Face_energyP
+
+
+landscape_energyP <- ggplot(Final_landscape, aes(x=Ldu)) + geom_point(aes(y= contrast_test)) + geom_line(aes(y=contrast_test, color = subj)) + labs(title = "Landscapes task Fil") + theme_minimal()
+landscape_energyP
+
+```
+
