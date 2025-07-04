@@ -1,0 +1,377 @@
+---
+title: "clean_analysis_contrast"
+author: "oscar"
+date: "2025-07-03"
+output: html_document
+---
+#Importing all package that could help
+```{r}
+library(readr)
+library(brms)
+library(ggplot2)
+library(tidyr)
+library(tidybayes)
+library(modelr)
+library(ggdist)
+library(rstan)
+library(ggrepel)
+library(RColorBrewer)
+library(posterior)
+library(distributional)
+library(HDInterval)
+library(bayesplot)
+library("see")
+library(bayestestR)
+```
+#Importing the data and scaling them
+
+```{r}
+
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+BL_DATA_CONTR <- read_csv("BL_DATA_CONTR.csv")
+
+#Filtering the 3 first duration because of a clear lacks of data points in theses durations
+df <- subset(BL_DATA_CONTR, BL_DATA_CONTR$duration_test > 2000) 
+
+
+#We rescale Log(E) contrast and Log(D) so their value are contained between 0 and 1
+df$Ldu <- df$Ldu - min(df$Ldu)
+df$Ldu <- df$Ldu/max(df$Ldu)
+
+df$Len <- df$Len - min(df$Len)
+df$Len <- df$Len/max(df$Len)
+
+df$contrast_test <- df$contrast_test - min(df$contrast_test)
+df$contrast_test <- df$contrast_test/max(df$contrast_test)
+
+```
+# We plot the data to have an idea of what we are doing/dealing with and if the importation/rescaling worked
+```{r}
+one <- ggplot(data = df, aes(x=Ldu,y=Len)) + geom_point(aes(color=task))
+one
+two <- ggplot(data = df, aes(x=Ldu,y=contrast_test)) + geom_point(aes(color=task))
+two
+```
+
+# Formula
+```{r}
+formula8 <- bf(  Len ~ b0 +    
+                   b1 * (Ldu - tC) * step(tC - Ldu) +    
+                   b2 * (Ldu - tC) * step(Ldu - tC),  
+                 b0 + b1 + b2 + tC ~ 1 + (1 | gr | subj),  # ← correlated random effects here  
+                 sigma ~ 1 + Ldu,  
+                 nl = TRUE)
+
+formula9 <- bf(  Len ~ b0 +    
+                   b1 * (Ldu - tC) * step(tC - Ldu) +    
+                   b2 * (Ldu - tC) * step(Ldu - tC),  
+                 b0 + b1 + b2 + tC ~ 1 + (1 | gr | subj),  # ← correlated random effects here  
+                 nl = TRUE)
+
+formula10 <- bf(  Len ~ b0 +    
+                    b1 * (Ldu - tC) * step(tC - Ldu) +    
+                    b2 * (Ldu - tC) * step(Ldu - tC),  
+                  b0 + b1 + b2 + tC ~ 1 + (1 | gr | subj) + (1|task),
+                  sigma ~ 1 + Ldu, # ← correlated random effects here  
+                  nl = TRUE)
+
+fsimple <- bf(
+  Len ~ b0 +
+    b2 * (Ldu - tC) * step(Ldu - tC),
+  b0  + b2 + tC ~ 1 + (1|gr|subj),  # ← correlated random effects here
+  nl = TRUE
+)
+
+fsimple2 <- bf(
+  Len ~ b0 +
+    b2 * (Ldu - tC) * step(Ldu - tC),
+  b0  + b2 + tC ~ 1 + (1|gr|subj) + (1|task),  # ← correlated random effects here
+  nl = TRUE
+)
+```
+
+
+
+```{r}
+# Flat priors
+
+priors8 <- c(  
+  set_prior('normal(0, 0.5)', nlpar = 'b0'),  
+  set_prior('normal(0, 1)', nlpar = 'b1'),  
+  set_prior('normal(0, 1)', nlpar = 'b2'),  
+  set_prior('normal(0.5, 0.25)', nlpar = 'tC'),  
+  set_prior('exponential(6)', class = 'sd', nlpar = 'b0'),  
+  set_prior('exponential(3)', class = 'sd', nlpar = 'b1'),  
+  set_prior('exponential(3)', class = 'sd', nlpar = 'b2'),  
+  set_prior('exponential(6)', class = 'sd', nlpar = 'tC'),  
+  set_prior('normal(0, 1)', class = 'b', dpar = 'sigma'),         # prior for slope of sigma model
+  set_prior('normal(0, 1)', class = 'Intercept', dpar = 'sigma'), # prior for intercept of sigma model
+  set_prior('lkj(1)', class = 'cor')
+)
+priors9 <- c(  
+  set_prior('normal(0, 0.5)', nlpar = 'b0'),  
+  set_prior('normal(0, 1)', nlpar = 'b1'),  
+  set_prior('normal(0, 1)', nlpar = 'b2'),  
+  set_prior('normal(0.5, 0.25)', nlpar = 'tC'),  
+  set_prior('exponential(6)', class = 'sd', nlpar = 'b0'),  
+  set_prior('exponential(3)', class = 'sd', nlpar = 'b1'),  
+  set_prior('exponential(3)', class = 'sd', nlpar = 'b2'),  
+  set_prior('exponential(6)', class = 'sd', nlpar = 'tC'),  
+  set_prior('lkj(1)', class = 'cor')
+)
+
+```
+
+
+#Model following student distribution because relatively low sample size and unknown sigma
+```{r}
+bmmsimple <-brm(
+  fsimple,
+  data = df,
+  prior = default_prior(fsimple,data = df),
+  chains = 4,
+  iter = 10000,
+  warmup = 3000,
+  family = "student",
+  sample_prior = 'yes', 
+  backend = "cmdstanr",
+  save_pars = save_pars(all = TRUE),
+  control = list(adapt_delta = 0.95, max_treedepth = 15)
+) #Broken stick model with a null slope for the first part (before tc) then a non null slope after tc Gaussian family should try student
+
+
+bmmsimple2 <-brm(
+  fsimple2,
+  data = df,
+  prior = default_prior(fsimple,data = df),
+  chains = 4,
+  iter = 10000,
+  warmup = 3000,
+  family = "student",
+  sample_prior = 'yes', 
+  backend = "cmdstanr",
+  save_pars = save_pars(all = TRUE),
+  control = list(adapt_delta = 0.95, max_treedepth = 15)
+) #Same thing as bmmsimple (broken stick first part has a null slope) but with the added mixed effect of task (objects, landscapes, faces)
+
+
+
+bmm8 <- brm(
+  formula8,
+  df,
+  family = "student",
+  prior = priors8,
+  cores = 4,
+  chains = 4,
+  iter = 10000,
+  warmup = 3000,
+  sample_prior = 'yes', 
+  backend = "cmdstanr",
+  save_pars = save_pars(all = TRUE),
+  control = list(adapt_delta = 0.95, max_treedepth = 15)
+) # Broken stick model with two different slope for two different part and a mixed effect for participants. It also follow a student law and take heteroscadiscity into account
+
+bmm9 <- brm(
+  formula9,
+  df,
+  family = "student",
+  prior = priors9,
+  cores = 4,
+  chains = 4,
+  iter = 10000,
+  warmup = 3000,
+  sample_prior = 'yes', 
+  backend = "cmdstanr",
+  save_pars = save_pars(all = TRUE),
+  control = list(adapt_delta = 0.95, max_treedepth = 15)
+) #same as bmm8 but without heteroscadiscity
+
+bmm10 <- brm(
+  formula10,
+  df,
+  family = "student",
+  prior = priors8,
+  cores = 4,
+  chains = 4,
+  iter = 10000,
+  warmup = 3000,
+  sample_prior = 'yes', 
+  backend = "cmdstanr",
+  save_pars = save_pars(all = TRUE),
+  control = list(adapt_delta = 0.95, max_treedepth = 15)
+) # same as bmm8 but with an extra mixed effect depending of the task (faces landscapes or objects)
+
+```
+
+
+#checking if the distribution fit with pp_check and checking conditional effect
+
+```{r}
+pp_check(bmm8, ndraws = 50) + labs(title = "bmm8")
+p8 <-plot(conditional_effects(bmm8), points = T, plot = F) 
+p8[[1]] + ggtitle("bmm8") + theme_modern()
+
+pp_check(bmm9,ndraws = 50)+ labs(title = "bmm9")
+p9 <- plot(conditional_effects(bmm9),points = T, plot = F)
+p9[[1]] + ggtitle("bmm9") + theme_modern()
+
+pp_check(bmm10,ndraws = 50) + labs(title = "bmm10")
+p10 <- plot(conditional_effects(bmm10),points = T, plot = F)
+p10[[1]] + ggtitle("bmm10") + theme_modern()
+
+pp_check(bmmsimple,ndraws = 50) + labs(title = "bmmsimple")
+psimple <- plot(conditional_effects(bmmsimple),points = T, plot = F)
+psimple[[1]] + ggtitle("bmmsimple") + theme_modern()
+
+pp_check(bmmsimple2,ndraws = 50) + labs(title = "bmmsimple2")
+psimple2 <- plot(conditional_effects(bmmsimple2),points = T, plot = F)
+psimple2[[1]] + ggtitle("bmmsimple2") + theme_modern()
+```
+
+# Extracting the loo
+
+```{r}
+
+
+
+loo8 <- loo(bmm8, save_psis = T)
+plot(loo8,label_points =T)
+psis8 <- loo8$psis_object
+psis8W <- weights(psis8)
+yrep8 <- posterior_predict(bmm8)
+ppc_loo_pit_overlay(df$Len,yrep8, lw = psis8W)
+
+
+
+loo9 <- loo(bmm9, save_psis = T)
+plot(loo9,label_points =T)
+psis9 <- loo9$psis_object
+psis9W <- weights(psis9)
+yrep9 <- posterior_predict(bmm9)
+ppc_loo_pit_overlay(df$Len,yrep9, lw = psis9W)
+
+
+loo10 <- loo(bmm10, save_psis = T)
+plot(loo10,label_points =T)
+psis10 <- loo10$psis_object
+psis10W <- weights(psis10)
+yrep10 <- posterior_predict(bmm10)
+ppc_loo_pit_overlay(df$Len,yrep10, lw = psis10W)
+
+loosimple <- loo(bmmsimple, save_psis = T)
+plot(loosimple,label_points =T)
+psissimple <- loosimple$psis_object
+psissimpleW <- weights(psissimple)
+yrepsimple <- posterior_predict(bmmsimple)
+ppc_loo_pit_overlay(df$Len,yrepsimple, lw = psissimpleW)
+
+
+loosimple2 <- loo(bmmsimple2, save_psis = T)
+plot(loosimple2,label_points =T)
+psissimple2 <- loosimple2$psis_object
+psissimple2W <- weights(psissimple2)
+yrepsimple2 <- posterior_predict(bmmsimple2)
+ppc_loo_pit_overlay(df$Len,yrepsimple2, lw = psissimple2W)
+
+
+```
+
+#Comparing the loo and computing Bayes factor
+
+```{r}
+loo_compare(loo8,loo9,loo10,loosimple,loosimple2)
+bayes_factor(bmm10,bmmsimple2, log = T)
+bayes_factor(bmm10,bmm8,log = T)
+bayes_factor(bmm8,bmmsimple,log = T)
+```
+#checking the posteriors of the "best" models
+```{r}
+fixef(bmm10)
+hypothesis(bmm10, "b1_Intercept = 0")
+
+posterior10 <- as.matrix(bmm10)
+posterior_plot <- mcmc_areas(posterior10,
+           pars = c("b_b1_Intercept","b_b2_Intercept"),
+           prob = 0.8) + vline_0() + theme_classic()
+posterior_plot + labs(title = "posterior distribution of bmm8's slopes", y = "parameters")
+
+result10 <- hdi(bmm10, effects = "fixed", component = "distributional", ci =  c(0.5, 0.75, 0.89, 0.95))
+plot(result10, priors = T, n_columns = 2)
+
+result8 <- hdi(bmm8, effects = "fixed", component = "distributional", ci =  c(0.5, 0.75, 0.89, 0.95))
+
+
+results2 <- hdi(bmmsimple2, effects = "fixed", component = "distributional", ci =  c(0.5, 0.75, 0.89, 0.95))
+plot(results2, priors = T )
+
+result_subset10 <- subset(result10, Component == "b1")
+HDIp10 <- plot(result_subset10, priors = T, data = bmm10, plot = F)
+HDIp10 + labs(subtitle = "bmm10") + theme_classic()
+
+
+result_subset8 <- subset(result8, Component == "b1")
+HDIp8 <- plot(result_subset8, priors = T, data = bmm8, plot = F)
+HDIp8 + labs(subtitle = "bmm8") + theme_classic()
+
+result_subsetS2 <- subset(results2, Component == "b2")
+HDIpS2 <- plot(result_subsetS2, priors = T, data = bmm10, plot = F)
+HDIpS2 + labs(subtitle = "bmmsimple2") + theme_classic()
+
+```
+#Leftovers 
+
+Don't really know what to do with this stuff for now
+
+```{r}
+
+fixef(bmm8)
+hypothesis(bmm8, "b1_Intercept = 0")
+
+
+posterior <- as.matrix(bmm8)
+posterior_plot <- mcmc_areas(posterior,
+           pars = c("b_b1_Intercept","b_b2_Intercept"),
+           prob = 0.8) + vline_0() + theme_classic()
+posterior_plot + labs(title = "posterior distribution of bmm8", y = "parameters") + scale_color_material()
+
+
+post = predicted_draws(bmm8, newdata=df, ndraws=100)
+
+
+pp_check(bmm9,ndraws = 100)
+plot(conditional_effects(bmm9),points = T)
+loo9 <- loo(bmm9, save_psis = T)
+plot(loo9)
+pipi <- loo9$psis_object
+PIPI <- weights(pipi)
+yrep9 <- posterior_predict(bmm9)
+ppc_loo_pit_overlay(df$contrast_test,yrep9, lw = PIPI)
+
+posterior <- as.matrix(bmm9)
+mcmc_areas(posterior,
+           pars = c("b_b1_Intercept","b_b0_Intercept","b_b2_Intercept"),
+           prob = 0.8) + vline_0()
+
+
+ppc_pit_ecdf(df$Len, yrep8, prob = 0.99, plot_diff = TRUE)
+
+result <- hdi(bmm8, effects = "fixed", component = "distributional", ci =  c(0.5, 0.75, 0.89, 0.95))
+plot(result, priors = T, n_columns = 2)
+
+#to check priors
+result_bf <- bayesfactor_parameters(bmm8, verbose = FALSE, component = "distributional")
+
+result_bf
+
+plot(result_bf) +
+  scale_color_material() +
+  scale_fill_material()
+
+loo_compare(loo8,loo9)
+#If we get rid of heteroscadiscity in bmm8 it suck the model overfit way too much
+
+
+plot(conditional_effects(bmm10),points =T)
+
+```
